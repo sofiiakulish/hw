@@ -43,10 +43,16 @@ var text = `Как видите, он  спускается  по  лестни�
 	посидеть у огня и послушать какую-нибудь интересную сказку.
 		В этот вечер...`
 
+var additionalTest = "a6 a5 a4 a3 a2 a1"
+
 func TestTop10(t *testing.T) {
 	t.Run("no words in empty string", func(t *testing.T) {
 		require.Len(t, Top10(""), 0)
 	})
+
+    t.Run("no words in string with only spaces", func(t *testing.T) {
+        require.Len(t, Top10("        "), 0)
+    })
 
 	t.Run("positive test", func(t *testing.T) {
 		if taskWithAsteriskIsCompleted {
@@ -78,5 +84,17 @@ func TestTop10(t *testing.T) {
 			}
 			require.Equal(t, expected, Top10(text))
 		}
+	})
+
+    t.Run("additional positive test", func(t *testing.T) {
+        expected := []string{
+            "a1",
+            "a2",
+            "a3",
+            "a4",
+            "a5",
+            "a6",
+        }
+        require.Equal(t, expected, Top10(additionalTest))
 	})
 }
