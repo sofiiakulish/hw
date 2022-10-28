@@ -1,4 +1,4 @@
-// +build !bench
+// +build !bench,!benchmark
 
 package hw10programoptimization
 
