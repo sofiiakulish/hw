@@ -3,7 +3,6 @@ package hw09structvalidator
 import (
 	"errors"
 	"fmt"
-	"github.com/fatih/structs"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -12,23 +11,16 @@ import (
 
 const VALIDATE_TAG_NAME = "validate"
 
-var NilValidationError = ValidationError{"", nil}
+var NoValidationError = ValidationError{"", nil}
 
-type ValidationError struct {
-	Field string
-	Err   error
-}
-
-type ValidationErrors []ValidationError
-
-type ValidatorType int
+type ValidatorType string
 
 const (
-	MIN ValidatorType = iota
-	MAX
-	LEN
-	REGEXP
-	IN
+	MIN ValidatorType = "min"
+	MAX ValidatorType = "max"
+	LEN ValidatorType = "len"
+	REGEXP ValidatorType = "regexp"
+	IN ValidatorType = "in"
 )
 
 type ValidatorValue string
@@ -38,31 +30,47 @@ type Validator struct {
 	Value ValidatorValue
 }
 
+type ValidationError struct {
+	Field string
+	Err   error
+}
+
+type ValidationErrors []ValidationError
+
 func (v ValidationErrors) Error() string {
-	var result string
+	var b strings.Builder
 
 	for _, validationError := range v {
-		result += fmt.Sprintf("Validation error for field %q: %s\n", validationError.Field, validationError.Err.Error())
+	    b.WriteString(fmt.Sprintf("Validation error for field %q: %s\n", validationError.Field, validationError.Err.Error()))
 	}
 
-	return result
+	return b.String()
 }
 
 func Validate(v interface{}) error {
 	var result ValidationErrors
 
-	fields := structs.Fields(v)
+    stT := reflect.TypeOf(v)
+    stV := reflect.ValueOf(v)
 
-	for _, field := range fields {
-		tag := field.Tag(VALIDATE_TAG_NAME)
-		if tag == "" {
-			continue
+    for i:=0; i<stT.NumField(); i++ {
+        field := stT.Field(i)
+        tag := field.Tag.Get(VALIDATE_TAG_NAME)
+        if tag == "" {
+            continue
+        }
+
+		validators, err := getValidators(tag)
+		if err != nil {
+		    return err
 		}
 
-		validators := getValidators(tag)
-
 		for _, validator := range validators {
-			validationErrors := valid(field, validator)
+			validationErrors, err := valid(field, reflect.Indirect(stV).FieldByName(field.Name).Interface(), validator)
+			if err != nil {
+			    return err
+			}
+
 			if validationErrors != nil {
 				result = append(result, validationErrors...)
 			}
@@ -76,7 +84,7 @@ func Validate(v interface{}) error {
 	return errors.New(result.Error())
 }
 
-func getValidators(tagValue string) []Validator {
+func getValidators(tagValue string) ([]Validator, error) {
 	var validator []Validator
 
 	validatorStrings := strings.Split(tagValue, "|")
@@ -85,181 +93,193 @@ func getValidators(tagValue string) []Validator {
 
 		delimiterPos := strings.Index(str, ":")
 		if delimiterPos == -1 {
-			panic("Incorrect validator definition. Semicolon should be present")
+			return nil, errors.New("Incorrect validator definition. Semicolon should be present")
 		}
 
 		typeString := str[0:delimiterPos]
-		typeValue := getValidatorTypeByString(typeString)
 
 		ruleString := str[delimiterPos+1:]
 		if ruleString == "" {
-			panic("Incorrect validator definition. Value should be present after semicolon")
+			return nil, errors.New("Incorrect validator definition. Value should be present after semicolon")
 		}
-		ruleValue := getValidatorValueByString(ruleString)
 
-		validator = append(validator, Validator{typeValue, ruleValue})
+		validator = append(validator, Validator{ValidatorType(typeString), ValidatorValue(ruleString)})
 	}
 
 	if len(validator) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	return validator
+	return validator, nil
 }
 
-func getValidatorTypeByString(typeString string) ValidatorType {
-	switch typeString {
-	case "min":
-		return MIN
-	case "max":
-		return MAX
-	case "len":
-		return LEN
-	case "regexp":
-		return REGEXP
-	case "in":
-		return IN
-	default:
-		panic("Unknown validation type '" + typeString + "'")
-	}
-}
-
-func getValidatorValueByString(ruleString string) ValidatorValue {
-	return ValidatorValue(ruleString)
-}
-
-func valid(f *structs.Field, validator Validator) []ValidationError {
-	rt := reflect.TypeOf(f.Value())
-	switch rt.Kind() {
+func valid(f reflect.StructField, fieldValue interface{}, validator Validator) ([]ValidationError, error) {
+	switch f.Type.Kind() {
 	case reflect.Slice, reflect.Array:
 		var result []ValidationError
 
-		array := reflect.ValueOf(f.Value())
+		array := reflect.ValueOf(fieldValue)
 
 		for i := 0; i < array.Len(); i++ {
-			result = append(result, validOneEntry(f.Name(), array.Index(i).Interface(), validator)...)
+		    oneEntryResult, err := validOneEntry(f.Name, array.Index(i).Interface(), validator)
+		    if err != nil {
+		        return nil, err
+		    }
+			result = append(result, oneEntryResult...)
 		}
 
-		return result
+		return result, nil
 	}
 
-	return validOneEntry(f.Name(), f.Value(), validator)
+	return validOneEntry(f.Name, fieldValue, validator)
 }
 
-func validOneEntry(fieldName string, fieldValue interface{}, validator Validator) []ValidationError {
+func validOneEntry(fieldName string, fieldValue interface{}, validator Validator) ([]ValidationError, error) {
 	switch validator.Type {
-	case MIN:
-		value := getIntOrPanic(fieldValue)
-		err := validateMin(fieldName, value, validator)
-		if err != NilValidationError {
-			return []ValidationError{err}
+	case "min":
+		value, typeErr := getInt(fieldValue)
+		if typeErr != nil {
+		    return nil, typeErr
 		}
-	case MAX:
-		value := getIntOrPanic(fieldValue)
-		err := validateMax(fieldName, value, validator)
-		if err != NilValidationError {
-			return []ValidationError{err}
+		validationErr, err := validateMin(fieldName, value, validator)
+		if err != nil {
+		    return nil, err
 		}
-	case LEN:
-		value := getStringOrPanic(fieldValue)
-
-		err := validateLen(fieldName, value, validator)
-		if err != NilValidationError {
-			return []ValidationError{err}
+		if validationErr != NoValidationError {
+			return []ValidationError{validationErr}, nil
 		}
-	case REGEXP:
-		value := getStringOrPanic(fieldValue)
-
-		err := validateRegexp(fieldName, value, validator)
-		if err != NilValidationError {
-			return []ValidationError{err}
+	case "max":
+		value, typeErr := getInt(fieldValue)
+		if typeErr != nil {
+		    return nil, typeErr
 		}
-	case IN:
+		validationErr, err := validateMax(fieldName, value, validator)
+        if err != nil {
+            return nil, err
+        }
+		if validationErr != NoValidationError {
+			return []ValidationError{validationErr}, nil
+		}
+	case "len":
+		value, typeErr := getString(fieldValue)
+		if typeErr != nil {
+		    return nil, typeErr
+		}
+		validationErr, err := validateLen(fieldName, value, validator)
+        if err != nil {
+            return nil, err
+        }
+		if validationErr != NoValidationError {
+			return []ValidationError{validationErr}, nil
+		}
+	case "regexp":
+		value, typeErr := getString(fieldValue)
+		if typeErr != nil {
+		    return nil, typeErr
+		}
+		validationErr, err := validateRegexp(fieldName, value, validator)
+        if err != nil {
+            return nil, err
+        }
+		if validationErr != NoValidationError {
+			return []ValidationError{validationErr}, nil
+		}
+	case "in":
 		switch reflect.TypeOf(fieldValue).Kind() {
 		case reflect.Int:
-			value := getIntOrPanic(fieldValue)
-
-			err := validateInInt(fieldName, value, validator)
-			if err != NilValidationError {
-				return []ValidationError{err}
+			value, typeErr := getInt(fieldValue)
+            if typeErr != nil {
+                return nil, typeErr
+            }
+			validationErr, err := validateInInt(fieldName, value, validator)
+            if err != nil {
+                return nil, err
+            }
+			if validationErr != NoValidationError {
+				return []ValidationError{validationErr}, nil
 			}
 		case reflect.String:
-			value := getStringOrPanic(fieldValue)
-
-			err := validateInString(fieldName, value, validator)
-			if err != NilValidationError {
-				return []ValidationError{err}
+			value, typeErr := getString(fieldValue)
+            if typeErr != nil {
+                return nil, typeErr
+            }
+			validationErr, err := validateInString(fieldName, value, validator)
+            if err != nil {
+                return nil, err
+            }
+			if validationErr != NoValidationError {
+				return []ValidationError{validationErr}, nil
 			}
 		}
 	default:
-		panic("Unsupported validation type")
+		return nil, errors.New("Unsupported validation type")
 	}
 
-	return nil
+	return nil, nil
 }
 
-func getIntOrPanic(v interface{}) int {
+func getInt(v interface{}) (int, error) {
 	if reflect.TypeOf(v).Kind() != reflect.Int {
-		panic(fmt.Errorf("Value should have type int. %s provided", reflect.TypeOf(v).Name()))
+		return 0, fmt.Errorf("Value should have type int. %s provided", reflect.TypeOf(v).Name())
 	}
 
-	return int(reflect.ValueOf(v).Int())
+	return int(reflect.ValueOf(v).Int()), nil
 }
 
-func getStringOrPanic(v interface{}) string {
+func getString(v interface{}) (string, error) {
 	if reflect.TypeOf(v).Kind() != reflect.String {
-		panic(fmt.Errorf("Value should have type string. %s provided", reflect.TypeOf(v).Kind()))
+		return "", fmt.Errorf("Value should have type string. %s provided", reflect.TypeOf(v).Kind())
 	}
 
-	return reflect.ValueOf(v).String()
+	return reflect.ValueOf(v).String(), nil
 }
 
-func validateMin(fieldName string, fieldValue int, validator Validator) ValidationError {
+func validateMin(fieldName string, fieldValue int, validator Validator) (ValidationError, error) {
 	validatorValue, err := strconv.Atoi(string(validator.Value))
 	if err != nil {
-		panic(fmt.Sprintf("Error geting int definition for the validator: %s", err))
+		return NoValidationError, fmt.Errorf("Error getting int definition for the validator: %s", err)
 	}
 
 	if fieldValue < validatorValue {
-		return ValidationError{fieldName, fmt.Errorf("Value should be more than %d. %d was provided", validatorValue, fieldValue)}
+		return ValidationError{fieldName, fmt.Errorf("Value should be more than %d. %d was provided", validatorValue, fieldValue)}, nil
 	}
 
-	return NilValidationError
+	return NoValidationError, nil
 }
 
-func validateMax(fieldName string, fieldValue int, validator Validator) ValidationError {
+func validateMax(fieldName string, fieldValue int, validator Validator) (ValidationError, error) {
 	validatorValue, err := strconv.Atoi(string(validator.Value))
 	if err != nil {
-		panic(err)
+		return NoValidationError, fmt.Errorf("Error getting int definition for the validator: %s", err)
 	}
 
 	if fieldValue > validatorValue {
-		return ValidationError{fieldName, fmt.Errorf("Value should be less than %d. %d was provided", validatorValue, fieldValue)}
+		return ValidationError{fieldName, fmt.Errorf("Value should be less than %d. %d was provided", validatorValue, fieldValue)}, nil
 	}
 
-	return NilValidationError
+	return NoValidationError, nil
 }
 
-func validateInString(fieldName string, fieldValue string, validator Validator) ValidationError {
+func validateInString(fieldName string, fieldValue string, validator Validator) (ValidationError, error) {
 	validatorValues := strings.Split(string(validator.Value), ",")
 
 	for _, val := range validatorValues {
 		if val == fieldValue {
-			return NilValidationError
+			return NoValidationError, nil
 		}
 	}
 
-	return ValidationError{fieldName, fmt.Errorf("Value should be in the list %q. %q was provided", string(validator.Value), fieldValue)}
+	return ValidationError{fieldName, fmt.Errorf("Value should be in the list %q. %q was provided", string(validator.Value), fieldValue)}, nil
 }
 
-func validateInInt(fieldName string, fieldValue int, validator Validator) ValidationError {
+func validateInInt(fieldName string, fieldValue int, validator Validator) (ValidationError, error) {
 	validatorValuesString := strings.Split(string(validator.Value), ",")
 	validatorValues := make([]int, len(validatorValuesString))
 
 	for k, v := range validatorValuesString {
 		value, err := strconv.Atoi(v)
 		if err != nil {
-			panic(fmt.Errorf("Error parsing validation value: %s", err))
+			return NoValidationError, fmt.Errorf("Error parsing validation value: %s", err)
 		}
 
 		validatorValues[k] = value
@@ -267,34 +287,34 @@ func validateInInt(fieldName string, fieldValue int, validator Validator) Valida
 
 	for _, val := range validatorValues {
 		if val == fieldValue {
-			return NilValidationError
+			return NoValidationError, nil
 		}
 	}
 
-	return ValidationError{fieldName, fmt.Errorf("Value should be in the list %q. %d was provided", string(validator.Value), fieldValue)}
+	return ValidationError{fieldName, fmt.Errorf("Value should be in the list %q. %d was provided", string(validator.Value), fieldValue)}, nil
 }
 
-func validateLen(fieldName string, fieldValue string, validator Validator) ValidationError {
+func validateLen(fieldName string, fieldValue string, validator Validator) (ValidationError, error) {
 	validatorValue, _ := strconv.Atoi(string(validator.Value))
 
 	if len(fieldValue) != validatorValue {
-		return ValidationError{fieldName, fmt.Errorf("Value should have length %d. %d (%q) provided", validatorValue, len(fieldValue), fieldValue)}
+		return ValidationError{fieldName, fmt.Errorf("Value should have length %d. %d (%q) provided", validatorValue, len(fieldValue), fieldValue)}, nil
 	}
 
-	return NilValidationError
+	return NoValidationError, nil
 }
 
-func validateRegexp(fieldName string, fieldValue string, validator Validator) ValidationError {
+func validateRegexp(fieldName string, fieldValue string, validator Validator) (ValidationError, error) {
 	validatorValue := string(validator.Value)
 
 	matched, err := regexp.MatchString(validatorValue, fieldValue)
 	if err != nil {
-		panic(fmt.Errorf("Error regexp: %s", err))
+		return NoValidationError, fmt.Errorf("Error regexp: %s", err)
 	}
 
 	if matched == false {
-		return ValidationError{fieldName, fmt.Errorf("Value should match regexp %q. Value %q is not match", validatorValue, fieldValue)}
+		return ValidationError{fieldName, fmt.Errorf("Value should match regexp %q. Value %q is not match", validatorValue, fieldValue)}, nil
 	}
 
-	return NilValidationError
+	return NoValidationError, nil
 }

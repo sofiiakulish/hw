@@ -89,7 +89,6 @@ func TestValidateWithValidationErrors(t *testing.T) {
 			err := Validate(tt.in)
 			require.Error(t, err)
 			require.Equal(t, tt.expectedErr, err)
-			_ = tt
 		})
 	}
 }
@@ -111,7 +110,6 @@ func TestValidateSuccess(t *testing.T) {
 
 			err := Validate(tt.in)
 			require.NoError(t, err)
-			_ = tt
 		})
 	}
 }
@@ -119,29 +117,25 @@ func TestValidateSuccess(t *testing.T) {
 func TestInvalidDefinition(t *testing.T) {
 	tests := []struct {
 		in interface{}
+		expectedErr error
 	}{
-		{in: InvalidLenIntDefinition{12345}},
-		{in: InvalidMinStringDefinition{"Name"}},
-		{in: InvalidMaxStringDefinition{"Name"}},
-		{in: InvalidRegexpIntDefinition{12}},
-		{in: InvalidLenDefinition{12345}},
-		{in: InvalidMinDefinition{123}},
-		{in: InvalidMaxDefinition{123}},
+		{in: InvalidLenIntDefinition{12345}, expectedErr: errors.New("Value should have type string. int provided")},
+		{in: InvalidMinStringDefinition{"Name"}, expectedErr: errors.New("Value should have type int. string provided")},
+		{in: InvalidMaxStringDefinition{"Name"}, expectedErr: errors.New("Value should have type int. string provided")},
+		{in: InvalidRegexpIntDefinition{12}, expectedErr: errors.New("Value should have type string. int provided")},
+		{in: InvalidLenDefinition{12345}, expectedErr: errors.New("Value should have type string. int provided")},
+		{in: InvalidMinDefinition{123}, expectedErr: errors.New("Error getting int definition for the validator: strconv.Atoi: parsing \"a\": invalid syntax")},
+		{in: InvalidMaxDefinition{123}, expectedErr: errors.New("Error getting int definition for the validator: strconv.Atoi: parsing \"a\": invalid syntax")},
 	}
 
 	for i, tt := range tests {
 		t.Run(fmt.Sprintf("case %d", i), func(t *testing.T) {
-			defer func() {
-				if r := recover(); r == nil {
-					t.Errorf("The code did not panic")
-				}
-			}()
-
 			tt := tt
 			t.Parallel()
 
-			Validate(tt.in)
-			_ = tt
+			err := Validate(tt.in)
+            require.Error(t, err)
+            require.Equal(t, tt.expectedErr, err)
 		})
 	}
 }
