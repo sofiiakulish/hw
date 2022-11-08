@@ -2,7 +2,9 @@ package hw09structvalidator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
 
@@ -34,18 +36,49 @@ type (
 		Code int    `validate:"in:200,404,500"`
 		Body string `json:"omitempty"`
 	}
+
+	InvalidLenIntDefinition struct {
+		ID int `validate:"len:36"`
+	}
+
+	InvalidMinStringDefinition struct {
+		Name string `validate:"min:36"`
+	}
+
+	InvalidMaxStringDefinition struct {
+		Name string `validate:"max:36"`
+	}
+
+	InvalidRegexpIntDefinition struct {
+		Name int `validate:"regexp:^\\w+@\\w+\\.\\w+$"`
+	}
+	InvalidLenDefinition struct {
+		ID int `validate:"len:a"`
+	}
+
+	InvalidMinDefinition struct {
+		ID int `validate:"min:a"`
+	}
+
+	InvalidMaxDefinition struct {
+		ID int `validate:"max:a"`
+	}
 )
 
-func TestValidate(t *testing.T) {
+func TestValidateWithValidationErrors(t *testing.T) {
 	tests := []struct {
-		in          interface{}
-		expectedErr error
+		in                interface{}
+		expectedErrString string
 	}{
-		{
-			// Place your code here.
-		},
-		// ...
-		// Place your code here.
+		{in: User{"123", "Name", 20, "1@gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: "Validation error for field \"ID\": Value should have length 36. 3 (\"123\") provided\n"},
+		{in: User{"123", "Name", 12, "1@gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: "Validation error for field \"ID\": Value should have length 36. 3 (\"123\") provided\nValidation error for field \"Age\": Value should be more than 18. 12 was provided\n"},
+		{in: User{"123456789012345678901234567890123456", "Name", 20, "1gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: fmt.Sprintf("Validation error for field \"Email\": Value should match regexp %q. Value \"1gmail.com\" is not match\n", "^\\w+@\\w+\\.\\w+$")},
+		{in: User{"123456789012345678901234567890123456", "Name", 20, "1@gmail.com", "admin2", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: "Validation error for field \"Role\": Value should be in the list \"admin,stuff\". \"admin2\" was provided\n"},
+		{in: User{"123456789012345678901234567890123456", "Name", 20, "1@gmail.com", "admin", []string{"123", "1234", "12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: "Validation error for field \"Phones\": Value should have length 11. 3 (\"123\") provided\nValidation error for field \"Phones\": Value should have length 11. 4 (\"1234\") provided\n"},
+
+		{in: App{"1234"}, expectedErrString: "Validation error for field \"Version\": Value should have length 5. 4 (\"1234\") provided\n"},
+
+		{in: Response{401, "Not Authorized"}, expectedErrString: "Validation error for field \"Code\": Value should be in the list \"200,404,500\". 401 was provided\n"},
 	}
 
 	for i, tt := range tests {
@@ -53,8 +86,55 @@ func TestValidate(t *testing.T) {
 			tt := tt
 			t.Parallel()
 
-			// Place your code here.
-			_ = tt
+			err := Validate(tt.in)
+			require.Equal(t, tt.expectedErrString, err.Error())
+		})
+	}
+}
+
+func TestValidateSuccess(t *testing.T) {
+	tests := []struct {
+		in interface{}
+	}{
+		{in: User{"123456789012345678901234567890123456", "Name", 20, "1@gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}},
+		{in: App{"12345"}},
+		{in: Token{[]byte(`"test"`), []byte(`"test"`), []byte(`"test"`)}},
+		{in: Response{200, "{}"}},
+	}
+
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("case %d", i), func(t *testing.T) {
+			tt := tt
+			t.Parallel()
+
+			err := Validate(tt.in)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestInvalidDefinition(t *testing.T) {
+	tests := []struct {
+		in interface{}
+		expectedErr error
+	}{
+		{in: InvalidLenIntDefinition{12345}, expectedErr: errors.New("Value should have type string. int provided")},
+		{in: InvalidMinStringDefinition{"Name"}, expectedErr: errors.New("Value should have type int. string provided")},
+		{in: InvalidMaxStringDefinition{"Name"}, expectedErr: errors.New("Value should have type int. string provided")},
+		{in: InvalidRegexpIntDefinition{12}, expectedErr: errors.New("Value should have type string. int provided")},
+		{in: InvalidLenDefinition{12345}, expectedErr: errors.New("Value should have type string. int provided")},
+		{in: InvalidMinDefinition{123}, expectedErr: errors.New("Error getting int definition for the validator: strconv.Atoi: parsing \"a\": invalid syntax")},
+		{in: InvalidMaxDefinition{123}, expectedErr: errors.New("Error getting int definition for the validator: strconv.Atoi: parsing \"a\": invalid syntax")},
+	}
+
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("case %d", i), func(t *testing.T) {
+			tt := tt
+			t.Parallel()
+
+			err := Validate(tt.in)
+            require.Error(t, err)
+            require.Equal(t, tt.expectedErr, err)
 		})
 	}
 }
