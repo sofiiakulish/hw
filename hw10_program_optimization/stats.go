@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 	"github.com/valyala/fastjson"
-	"bytes"
 	"sync"
+	"bufio"
 )
 
 type User struct {
@@ -39,37 +39,18 @@ var userPool = sync.Pool{
 }
 
 func getUsers(r io.Reader) (result users, err error) {
-	var buf  bytes.Buffer
-	_, err = io.Copy(&buf, r)
-
-	if err != nil {
-		return
-	}
-
-	lines := strings.Split(buf.String(), "\n")
-
 	var p fastjson.Parser
-	//var user User
+	var i int = 0
 
-	// pool.Put(user)
+    scanner := bufio.NewScanner(r)
 
-	for i, line := range lines {
-		v, err2 := p.Parse(line)
+    for scanner.Scan() {
+		v, err2 := p.Parse(string(scanner.Text()))
 		if err2 != nil {
 				return
 		}
 
 		user := userPool.Get().(*User)
-
-		// user = User{
-		// 	v.GetInt("Id"),
-		// 	string(v.GetStringBytes("Name")),
-		// 	string(v.GetStringBytes("Username")),
-		// 	string(v.GetStringBytes("Email")),
-		// 	string(v.GetStringBytes("Phone")),
-		// 	string(v.GetStringBytes("Password")),
-		// 	string(v.GetStringBytes("Address")),
-		// }
 		user.ID = v.GetInt("Id")
 		user.Name = string(v.GetStringBytes("Name"))
 		user.Username = string(v.GetStringBytes("Username"))
@@ -79,6 +60,7 @@ func getUsers(r io.Reader) (result users, err error) {
 		user.Address = string(v.GetStringBytes("Address"))
 
 		result[i] = *user
+		i++
 		userPool.Put(user)
 	}
 	return
@@ -101,5 +83,6 @@ func countDomains(u users, domain string) (DomainStat, error) {
 			result[value] += 1
 		}
 	}
+
 	return result, nil
 }
