@@ -78,10 +78,10 @@ func Validate(v interface{}) error {
 	}
 
 	if len(result) == 0 {
-		return nil
-	}
+    	return nil
+    }
 
-	return errors.New(result.Error())
+	return result
 }
 
 func getValidators(tagValue string) ([]Validator, error) {

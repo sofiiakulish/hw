@@ -67,18 +67,18 @@ type (
 
 func TestValidateWithValidationErrors(t *testing.T) {
 	tests := []struct {
-		in          interface{}
-		expectedErr error
+		in                interface{}
+		expectedErrString string
 	}{
-		{in: User{"123", "Name", 20, "1@gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErr: errors.New("Validation error for field \"ID\": Value should have length 36. 3 (\"123\") provided\n")},
-		{in: User{"123", "Name", 12, "1@gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErr: errors.New("Validation error for field \"ID\": Value should have length 36. 3 (\"123\") provided\nValidation error for field \"Age\": Value should be more than 18. 12 was provided\n")},
-		{in: User{"123456789012345678901234567890123456", "Name", 20, "1gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErr: errors.New(fmt.Sprintf("Validation error for field \"Email\": Value should match regexp %q. Value \"1gmail.com\" is not match\n", "^\\w+@\\w+\\.\\w+$"))},
-		{in: User{"123456789012345678901234567890123456", "Name", 20, "1@gmail.com", "admin2", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErr: errors.New("Validation error for field \"Role\": Value should be in the list \"admin,stuff\". \"admin2\" was provided\n")},
-		{in: User{"123456789012345678901234567890123456", "Name", 20, "1@gmail.com", "admin", []string{"123", "1234", "12345678901"}, []byte(`{"data": "test"}`)}, expectedErr: errors.New("Validation error for field \"Phones\": Value should have length 11. 3 (\"123\") provided\nValidation error for field \"Phones\": Value should have length 11. 4 (\"1234\") provided\n")},
+		{in: User{"123", "Name", 20, "1@gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: "Validation error for field \"ID\": Value should have length 36. 3 (\"123\") provided\n"},
+		{in: User{"123", "Name", 12, "1@gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: "Validation error for field \"ID\": Value should have length 36. 3 (\"123\") provided\nValidation error for field \"Age\": Value should be more than 18. 12 was provided\n"},
+		{in: User{"123456789012345678901234567890123456", "Name", 20, "1gmail.com", "admin", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: fmt.Sprintf("Validation error for field \"Email\": Value should match regexp %q. Value \"1gmail.com\" is not match\n", "^\\w+@\\w+\\.\\w+$")},
+		{in: User{"123456789012345678901234567890123456", "Name", 20, "1@gmail.com", "admin2", []string{"12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: "Validation error for field \"Role\": Value should be in the list \"admin,stuff\". \"admin2\" was provided\n"},
+		{in: User{"123456789012345678901234567890123456", "Name", 20, "1@gmail.com", "admin", []string{"123", "1234", "12345678901"}, []byte(`{"data": "test"}`)}, expectedErrString: "Validation error for field \"Phones\": Value should have length 11. 3 (\"123\") provided\nValidation error for field \"Phones\": Value should have length 11. 4 (\"1234\") provided\n"},
 
-		{in: App{"1234"}, expectedErr: errors.New("Validation error for field \"Version\": Value should have length 5. 4 (\"1234\") provided\n")},
+		{in: App{"1234"}, expectedErrString: "Validation error for field \"Version\": Value should have length 5. 4 (\"1234\") provided\n"},
 
-		{in: Response{401, "Not Auhorized"}, expectedErr: errors.New("Validation error for field \"Code\": Value should be in the list \"200,404,500\". 401 was provided\n")},
+		{in: Response{401, "Not Authorized"}, expectedErrString: "Validation error for field \"Code\": Value should be in the list \"200,404,500\". 401 was provided\n"},
 	}
 
 	for i, tt := range tests {
@@ -87,8 +87,7 @@ func TestValidateWithValidationErrors(t *testing.T) {
 			t.Parallel()
 
 			err := Validate(tt.in)
-			require.Error(t, err)
-			require.Equal(t, tt.expectedErr, err)
+			require.Equal(t, tt.expectedErrString, err.Error())
 		})
 	}
 }
